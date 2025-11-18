@@ -20,6 +20,7 @@ from sparsimony.dst.set import SET
 from sparsimony.dst.gmp import GMP
 from sparsimony.dst.static import StaticMagnitudeSparsifier
 from sparsimony.pruners import SRSTESparsifier
+from sparsimony.dst.set_delta import SET_Delta
 
 
 def rigl(
@@ -95,6 +96,27 @@ def set(
         global_pruning=global_pruning,
     )
 
+
+def set_delta(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_end: int,
+    delta_t: int = 100,
+    pruning_ratio: float = 0.3,
+    global_pruning: bool = False,
+) -> SET_Delta:
+
+    return SET_Delta(
+        scheduler=ConstantScheduler(
+            quantity=pruning_ratio,
+            t_end=t_end,
+            delta_t=delta_t,
+        ),
+        distribution=UniformDistribution(),
+        optimizer=optimizer,
+        sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
 
 def gmp(
     optimizer: torch.optim.Optimizer,
