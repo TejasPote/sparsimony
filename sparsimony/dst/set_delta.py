@@ -14,10 +14,11 @@ from sparsimony.mask_calculators import (
     MagnitudeScorer,
     RandomScorer,
 )
-from .set import SET
 
 
-class SET_Delta(SET):
+
+class SET_Delta(DSTMixin, BaseSparsifier):
+
     def __init__(
         self,
         scheduler: BaseScheduler,
@@ -37,9 +38,77 @@ class SET_Delta(SET):
         self.init_method = init_method
         if defaults is None:
             defaults = dict(parametrization=dfsb)
+        super().__init__(
+            optimizer=optimizer, defaults=defaults, *args, **kwargs
+        )
+        self.pruner = UnstructuredPruner(scorer=MagnitudeScorer)
+        self.grower = UnstructuredGrower(scorer=RandomScorer)
 
-        super().__init__(optimizer=optimizer, defaults=defaults, init_method = init_method, scheduler = scheduler, distribution = distribution, *args, **kwargs)
+    def _step(self) -> bool:
+        _topo_updated = False
+        self._step_count += 1
+        prune_ratio = self.scheduler(self._step_count)
+        if prune_ratio is not None:
+            if self.global_pruning:
+                self._global_step(prune_ratio)
+            else:
+                self._distribute_sparsity(self.sparsity)
+                for config in self.groups:
+                    config["prune_ratio"] = prune_ratio
+                    self.update_mask(**config)
+                self._broadcast_masks()
+            _topo_updated = True
+        return _topo_updated
 
+    def update_mask(
+        self,
+        module: nn.Module,
+        tensor_name: str,
+        sparsity: float,
+        prune_ratio: float,
+        **kwargs,
+    ):
+        mask = get_mask(module, tensor_name)
+        if sparsity == 0:
+            mask.data = torch.ones_like(mask)
+        else:
+            weights = getattr(module, tensor_name)
+            original_weights = get_original_tensor(module, tensor_name)
+            target_sparsity = self.get_sparsity_from_prune_ratio(mask, prune_ratio)
+            self.prune_mask(target_sparsity, mask, values=weights)
+            self.grow_mask(sparsity, mask, original_weights, values = original_weights)
+            self._assert_sparsity_level(mask, sparsity)
+
+    def _initialize_masks(self) -> None:
+        self._distribute_sparsity(self.sparsity)
+        if self.global_pruning:
+            self._global_init_prune()
+            return
+        for config in self.groups:
+            # Prune to target sparsity for this step
+            mask = get_mask(config["module"], config["tensor_name"])
+            weights = getattr(config["module"], config["tensor_name"])
+            self.prune_mask(config["sparsity"], mask, values=weights)
+
+    def _global_step(self, prune_ratio: float) -> None:
+        global_data_helper = GlobalPruningDataHelper(
+            self.groups, self.global_buffers_cpu_offload
+        )
+        target_sparsity = self.get_sparsity_from_prune_ratio(
+            global_data_helper.masks, prune_ratio
+        )
+        self.prune_mask(
+            target_sparsity,
+            global_data_helper.masks,
+            values=global_data_helper.original_weights,
+        )
+        self.grow_mask(
+            self.sparsity,
+            global_data_helper.masks,
+            global_data_helper.original_weights,
+        )
+        self._assert_sparsity_level(global_data_helper.masks, self.sparsity)
+        global_data_helper.reshape_and_assign_masks()
 
     def grow_mask(self, sparsity, mask, original_weights, *args, **kwargs):
         old_mask = torch.clone(mask)
