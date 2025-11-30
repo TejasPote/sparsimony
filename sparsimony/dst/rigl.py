@@ -27,7 +27,7 @@ class RigL(DSTMixin, BaseSparsifier):
         defaults: Optional[Dict[str, Any]] = None,
         sparsity: float = 0.5,
         grown_weights_init: float = 0.0,
-        init_method: Optional[str] = "grad_flow",
+        init_method: Optional[str] = None,
         low_mem_mode: bool = False,
         *args,
         **kwargs,
