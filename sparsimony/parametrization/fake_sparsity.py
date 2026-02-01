@@ -56,7 +56,7 @@ class FakeSparsityDenseGradBuffer(FakeSparsity):
             "dense_grad", torch.zeros(self.mask.shape, device=mask.device)
         )
         # Default true in case we need to update mask on step 1
-        self.accumulate = True
+        self.accumulate = False
 
 
 def _accumulate_grad_bhook(self, grad_input, grad_output):

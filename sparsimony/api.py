@@ -21,6 +21,7 @@ from sparsimony.dst.gmp import GMP
 from sparsimony.dst.static import StaticMagnitudeSparsifier
 from sparsimony.pruners import SRSTESparsifier
 from sparsimony.dst.set_delta import SET_Delta
+from sparsimony.dst.rigl_delta import RigLDelta
 
 
 def rigl(
@@ -117,6 +118,47 @@ def set_delta(
         sparsity=sparsity,
         global_pruning=global_pruning,
     )
+
+
+def rigl_delta(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_end: int,
+    delta_t: int = 100,
+    pruning_ratio: float = 0.3,
+    global_pruning: bool = False,
+) -> RigLDelta:
+    """Return RigL-Delta sparsifier.
+    
+    RigL-Delta combines Dense Forward Sparse Backward (DFSB) parametrization
+    with Gradient-based growth of RigL.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+        t_end (int): Step to freeze the sparse topology. Typically 75% of total
+            training optimizer steps.
+        delta_t (int, optional): Steps between topology update. Defaults to 100.
+        pruning_ratio (float, optional): Fraction of nnz elements to prune each
+            iteration. Defaults to 0.3.
+
+    Returns:
+        RigLDelta: Initialized RigL-Delta sparsifier.
+    """
+    return RigLDelta(
+        scheduler=ConstantScheduler(
+            quantity=pruning_ratio,
+            t_end=t_end,
+            delta_t=delta_t,
+        ),
+        distribution=UniformDistribution(),
+        optimizer=optimizer,
+        sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
 
 def gmp(
     optimizer: torch.optim.Optimizer,
