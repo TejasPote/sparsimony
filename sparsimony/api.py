@@ -48,12 +48,12 @@ def rigl(
         RigL: Initialized rigl sparsifier.
     """
     return RigL(
-        scheduler=CosineDecayScheduler(
+        scheduler=ConstantScheduler(
             quantity=pruning_ratio,
             t_end=t_end,
             delta_t=delta_t,
         ),
-        distribution=ERKDistribution(),
+        distribution=UniformDistribution(),
         optimizer=optimizer,
         sparsity=sparsity,
         global_pruning=global_pruning,
