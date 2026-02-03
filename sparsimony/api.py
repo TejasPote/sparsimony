@@ -18,7 +18,10 @@ from sparsimony.dst.rigl import RigL
 from sparsimony.dst.srigl import SRigL, NMSRigL
 from sparsimony.dst.set import SET
 from sparsimony.dst.gmp import GMP
-from sparsimony.dst.static import StaticMagnitudeSparsifier
+from sparsimony.dst.static import (
+    StaticMagnitudeSparsifier,
+    StaticGradientSparsifier,
+)
 from sparsimony.pruners import SRSTESparsifier
 from sparsimony.dst.set_delta import SET_Delta
 from sparsimony.dst.rigl_delta import RigLDelta
@@ -225,6 +228,30 @@ def static(
         StaticMagnitudeSparsifier: Initialized StaticMagnitude sparsifier.
     """
     return StaticMagnitudeSparsifier(
+        optimizer=optimizer,
+        distribution=UniformDistribution(),
+        sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
+
+def static_gradient(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    global_pruning: bool = False,
+) -> StaticGradientSparsifier:
+    """Return StaticGradient sparsifier.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+
+    Returns:
+        StaticGradientSparsifier: Initialized StaticGradient sparsifier.
+    """
+    return StaticGradientSparsifier(
         optimizer=optimizer,
         distribution=UniformDistribution(),
         sparsity=sparsity,

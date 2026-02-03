@@ -9,9 +9,12 @@ import deepspeed
 
 from sparsimony.dst.base import DSTMixin
 from sparsimony.distributions.base import BaseDistribution
-from sparsimony.parametrization.fake_sparsity import FakeSparsity
+from sparsimony.parametrization.fake_sparsity import (
+    FakeSparsity,
+    FakeSparsityDenseGradBuffer,
+)
 from sparsimony.mask_calculators import UnstructuredPruner, MagnitudeScorer
-from sparsimony.utils import get_mask
+from sparsimony.utils import get_mask, get_parametrization
 from sparsimony.schedulers.base import BaseScheduler, StaticScheduler
 
 
@@ -177,3 +180,96 @@ class StaticSparsifier(DSTMixin, BaseSparsifier):
             f"Layerwise Sparsity Actual: {layerwise_sparsity_actual}\n"
             f"Active/Total Neurons: {active_vs_total_neurons}\n"
         )
+
+
+class StaticGradientSparsifier(DSTMixin, BaseSparsifier):
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        distribution: BaseDistribution,
+        sparsity: float,
+        defaults: Optional[Dict[str, Any]] = None,
+        scheduler: BaseScheduler | None = None,
+        *args,
+        **kwargs,
+    ):
+        optimizer = optimizer
+        if scheduler is None:
+            scheduler = StaticScheduler()
+        self.scheduler = scheduler
+        self.distribution = distribution
+        self.sparsity = sparsity
+        if defaults is None:
+            defaults = dict(parametrization=FakeSparsityDenseGradBuffer)
+        super().__init__(
+            optimizer=optimizer, defaults=defaults, *args, **kwargs
+        )
+        self.pruner = UnstructuredPruner(scorer=MagnitudeScorer)
+
+    def _assert_sparsity_level(self, mask: torch.Tensor, sparsity_level: float):
+        n_ones = mask.sum(dtype=torch.int)
+        actual_n_ones = int(mask.numel() * (1 - sparsity_level))
+        if abs(n_ones - actual_n_ones) > 1:
+            self._logger.warning(
+                "Actual n_ones != target_n_ones "
+                f"({n_ones} != {actual_n_ones})"
+            )
+
+    def _initialize_masks(self):
+        self._distribute_sparsity(self.sparsity)
+        # Initialize masks to 1s (dense) and accumulate gradients
+        for config in self.groups:
+            mask = get_mask(config["module"], config["tensor_name"])
+            mask.data = torch.ones_like(mask, dtype=torch.bool)
+            
+            # Enable gradient accumulation on the parametrization
+            module = config["module"]
+            tensor_name = config["tensor_name"]
+            parametrization = get_parametrization(module, tensor_name)
+            if hasattr(parametrization, "accumulate"):
+                parametrization.accumulate = True
+
+    def _step(self):
+        self._step_count += 1
+        if self._step_count == 1:
+            if self.global_pruning:
+                 # Not implemented for now as per plan, focusing on layerwise first or reuse logic if generic
+                pass # TODO: Add global pruning support if needed
+
+            for config in self.groups:
+                # Retrieve dense gradients
+                module = config["module"]
+                tensor_name = config["tensor_name"]
+                parametrization = get_parametrization(module, tensor_name)
+                
+                if not hasattr(parametrization, "dense_grad"):
+                     self._logger.warning(
+                        f"Parametrization for {tensor_name} has no dense_grad buffer. Skipping pruning."
+                    )
+                     continue
+
+                dense_grad = parametrization.dense_grad
+                weights = getattr(module, tensor_name)
+                
+                # Compute score: | weight * gradient |
+                score = torch.abs(weights * dense_grad)
+                
+                # Prune
+                mask = get_mask(module, tensor_name)
+                mask.data = self.pruner.calculate_mask(
+                    config["sparsity"], mask, values=score
+                )
+                self._assert_sparsity_level(mask.data, self.sparsity)
+                
+                # Disable accumulation and free memory if possible
+                if hasattr(parametrization, "accumulate"):
+                    parametrization.accumulate = False
+                    parametrization.dense_grad = torch.zeros(
+                         mask.shape, device=mask.device
+                    ) # Clear buffer
+
+    def grow_mask(self):
+        pass
+
+    def update_mask(self):
+        pass
