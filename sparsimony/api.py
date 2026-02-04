@@ -25,6 +25,7 @@ from sparsimony.dst.static import (
 from sparsimony.pruners import SRSTESparsifier
 from sparsimony.dst.set_delta import SET_Delta
 from sparsimony.dst.rigl_delta import RigLDelta
+from sparsimony.dst.signed_grad import SignedGradDST
 
 
 def rigl(
@@ -151,6 +152,48 @@ def rigl_delta(
         RigLDelta: Initialized RigL-Delta sparsifier.
     """
     return RigLDelta(
+        scheduler=ConstantScheduler(
+            quantity=pruning_ratio,
+            t_end=t_end,
+            delta_t=delta_t,
+        ),
+        distribution=UniformDistribution(),
+        optimizer=optimizer,
+        sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
+
+def signed_grad(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_end: int,
+    delta_t: int = 100,
+    pruning_ratio: float = 0.3,
+    global_pruning: bool = False,
+) -> SignedGradDST:
+    """Return SignedGradDST sparsifier.
+    
+    SignedGradDST method:
+    - Dense initialization (all ones).
+    - Prunes based on signed value of sign(W)*Grad (removes most negative).
+    - Grows based on gradient magnitude.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+        t_end (int): Step to freeze the sparse topology. Typically 75% of total
+            training optimizer steps.
+        delta_t (int, optional): Steps between topology update. Defaults to 100.
+        pruning_ratio (float, optional): Fraction of nnz elements to prune each
+            iteration. Defaults to 0.3.
+
+    Returns:
+        SignedGradDST: Initialized SignedGradDST sparsifier.
+    """
+    return SignedGradDST(
         scheduler=ConstantScheduler(
             quantity=pruning_ratio,
             t_end=t_end,

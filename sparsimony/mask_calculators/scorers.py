@@ -143,6 +143,13 @@ class RandomScorer(ABCScorer):
         )
 
 
+class IdentityScorer(ABCScorer):
+
+    @classmethod
+    def score(cls, values: torch.Tensor, *args, **kwargs):
+        return values
+
+
 class AblatedTileScorer(ABCScorer):
 
     @classmethod
