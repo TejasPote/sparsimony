@@ -152,12 +152,12 @@ def rigl_delta(
         RigLDelta: Initialized RigL-Delta sparsifier.
     """
     return RigLDelta(
-        scheduler=ConstantScheduler(
+        scheduler=CosineDecayScheduler(
             quantity=pruning_ratio,
             t_end=t_end,
             delta_t=delta_t,
         ),
-        distribution=UniformDistribution(),
+        distribution=ERKDistribution(),
         optimizer=optimizer,
         sparsity=sparsity,
         global_pruning=global_pruning,
