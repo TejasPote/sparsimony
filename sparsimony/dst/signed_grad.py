@@ -57,6 +57,7 @@ class SignedGradDST(RigLDelta):
     @torch.no_grad()
     def _initialize_masks(self):
         """Initializes masks to all ones (Dense)."""
+        self._distribute_sparsity(self.sparsity)
         for config in self.groups:
             # Set mask to all ones
             mask = config["module"].parametrizations[config["tensor_name"]][0].mask
@@ -87,9 +88,9 @@ class SignedGradDST(RigLDelta):
         
         # 1. Calculate Pruning Score
         # Score = sign(Weight) * DenseGrad
-        weight = getattr(module.parametrizations[tensor_name], "original")
+        original_weights = getattr(module.parametrizations[tensor_name], "original")
         
-        pruning_score = torch.sign(weight) * dense_grads
+        pruning_score = torch.sign(original_weights) * dense_grads
         
         # 2. Prune
         # Calculate target sparsity for this step (we prune down to this)
@@ -109,7 +110,7 @@ class SignedGradDST(RigLDelta):
         # But RigL calls self.prune_mask(..., values=weights).
         # We will call self.prune_mask(..., values=pruning_score).
         
-        self.pruner.calculate_mask(
+        self.prune_mask(
             target_sparsity,
             mask,
             values=pruning_score
@@ -120,10 +121,11 @@ class SignedGradDST(RigLDelta):
         # RigL grows active weights based on magnitude of gradient.
         # self.grower uses MagnitudeScorer (default for RigL).
         
-        self.grower.calculate_mask(
+        self.grow_mask(
             sparsity,
             mask,
-            values=dense_grads
+            values=dense_grads,
+            original_weights=original_weights
         )
         
         # Ensure sparsity level is correct
