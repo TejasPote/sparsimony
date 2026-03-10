@@ -54,7 +54,7 @@ def rigl(
         RigL: Initialized rigl sparsifier.
     """
     return RigL(
-        scheduler=ConstantScheduler(
+        scheduler=CosineDecayScheduler(
             quantity=pruning_ratio,
             t_end=t_end,
             delta_t=delta_t,
@@ -91,7 +91,7 @@ def set(
         SET: Initialized SET sparsifier.
     """
     return SET(
-        scheduler=ConstantScheduler(
+        scheduler=CosineDecayScheduler(
             quantity=pruning_ratio,
             t_end=t_end,
             delta_t=delta_t,
