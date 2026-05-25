@@ -109,11 +109,11 @@ def set_delta(
     t_end: int,
     delta_t: int = 100,
     pruning_ratio: float = 0.3,
-    global_pruning: bool = False,
+    global_pruning: bool = True,
 ) -> SET_Delta:
 
     return SET_Delta(
-        scheduler=ConstantScheduler(
+        scheduler=CosineDecayScheduler(
             quantity=pruning_ratio,
             t_end=t_end,
             delta_t=delta_t,
@@ -131,7 +131,7 @@ def rigl_delta(
     t_end: int,
     delta_t: int = 100,
     pruning_ratio: float = 0.3,
-    global_pruning: bool = False,
+    global_pruning: bool = True,
 ) -> RigLDelta:
     """Return RigL-Delta sparsifier.
     
@@ -158,7 +158,7 @@ def rigl_delta(
             t_end=t_end,
             delta_t=delta_t,
         ),
-        distribution=ERKDistribution(),
+        distribution=UniformDistribution(),
         optimizer=optimizer,
         sparsity=sparsity,
         global_pruning=global_pruning,

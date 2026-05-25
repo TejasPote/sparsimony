@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import torch
 import torch.nn as nn
 from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
@@ -43,6 +43,7 @@ class SET_Delta(DSTMixin, BaseSparsifier):
         )
         self.pruner = UnstructuredPruner(scorer=MagnitudeScorer)
         self.grower = UnstructuredGrower(scorer=RandomScorer)
+        self._pretrained_weights: Dict[Tuple[int, str], torch.Tensor] = {}
 
     def _step(self) -> bool:
         _topo_updated = False
@@ -74,12 +75,18 @@ class SET_Delta(DSTMixin, BaseSparsifier):
         else:
             weights = getattr(module, tensor_name)
             original_weights = get_original_tensor(module, tensor_name)
+            key = (id(module), tensor_name)
+            delta_weights = weights - self._pretrained_weights[key]
             target_sparsity = self.get_sparsity_from_prune_ratio(mask, prune_ratio)
-            self.prune_mask(target_sparsity, mask, values=weights)
-            self.grow_mask(sparsity, mask, original_weights, values = original_weights)
+            self.prune_mask(target_sparsity, mask, values=delta_weights)
+            self.grow_mask(sparsity, mask, original_weights, values=original_weights)
             self._assert_sparsity_level(mask, sparsity)
 
     def _initialize_masks(self) -> None:
+        for config in self.groups:
+            module, tensor_name = config["module"], config["tensor_name"]
+            key = (id(module), tensor_name)
+            self._pretrained_weights[key] = get_original_tensor(module, tensor_name).detach().clone()
         self._distribute_sparsity(self.sparsity)
         if self.global_pruning:
             self._global_init_prune()
@@ -97,6 +104,8 @@ class SET_Delta(DSTMixin, BaseSparsifier):
         target_sparsity = self.get_sparsity_from_prune_ratio(
             global_data_helper.masks, prune_ratio
         )
+
+        self._logger.info(f"Global pruning with target sparsity: {target_sparsity:.4f}")
         self.prune_mask(
             target_sparsity,
             global_data_helper.masks,
