@@ -12,11 +12,14 @@ from sparsimony.schedulers.base import (
     BaseScheduler,
     ConstantScheduler,
     CosineDecayScheduler,
+    DenseToSparseCosineScheduler,
     AlwaysTrueScheduler,
 )
 from sparsimony.dst.rigl import RigL
+from sparsimony.dst.rigl_d2s import RigL_D2S
 from sparsimony.dst.srigl import SRigL, NMSRigL
 from sparsimony.dst.set import SET
+from sparsimony.dst.set_d2s import SET_D2S
 from sparsimony.dst.gmp import GMP
 from sparsimony.dst.static import (
     StaticMagnitudeSparsifier,
@@ -99,6 +102,100 @@ def set(
         distribution=UniformDistribution(),
         optimizer=optimizer,
         sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
+
+def rigl_d2s(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_end: int,
+    t_dense: int,
+    delta_t: int = 100,
+    pruning_ratio: float = 0.3,
+    global_pruning: bool = False,
+) -> RigL_D2S:
+    """Return a Dense-to-Sparse RigL (RigL_D2S) sparsifier.
+
+    Identical to :func:`rigl` but trains fully dense until ``t_dense`` and only
+    then begins RigL dynamic sparse training. Uses
+    :class:`DenseToSparseCosineScheduler`, which re-anchors the cosine prune
+    schedule to ``[t_dense, t_end]``.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+        t_end (int): Step to freeze the sparse topology. Typically 75% of total
+            training optimizer steps.
+        t_dense (int): End step of the initial dense-training phase. Sparse
+            training begins at the first ``delta_t`` boundary >= ``t_dense``.
+        delta_t (int, optional): Steps between topology update. Defaults to 100.
+        pruning_ratio (float, optional): Fraction of nnz elements to prune each
+            iteration. Defaults to 0.3.
+
+    Returns:
+        RigL_D2S: Initialized RigL_D2S sparsifier.
+    """
+    return RigL_D2S(
+        scheduler=DenseToSparseCosineScheduler(
+            quantity=pruning_ratio,
+            t_end=t_end,
+            delta_t=delta_t,
+            t_dense=t_dense,
+        ),
+        distribution=UniformDistribution(),
+        optimizer=optimizer,
+        sparsity=sparsity,
+        t_dense=t_dense,
+        global_pruning=global_pruning,
+    )
+
+
+def set_d2s(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_end: int,
+    t_dense: int,
+    delta_t: int = 100,
+    pruning_ratio: float = 0.3,
+    global_pruning: bool = False,
+) -> SET_D2S:
+    """Return a Dense-to-Sparse SET (SET_D2S) sparsifier.
+
+    Identical to :func:`set` but trains fully dense until ``t_dense`` and only
+    then begins SET dynamic sparse training. Uses
+    :class:`DenseToSparseCosineScheduler`, which re-anchors the cosine prune
+    schedule to ``[t_dense, t_end]``.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+        t_end (int): Step to freeze the sparse topology. Typically 75% of total
+            training optimizer steps.
+        t_dense (int): End step of the initial dense-training phase. Sparse
+            training begins at the first ``delta_t`` boundary >= ``t_dense``.
+        delta_t (int, optional): Steps between topology update. Defaults to 100.
+        pruning_ratio (float, optional): Fraction of nnz elements to prune each
+            iteration. Defaults to 0.3.
+
+    Returns:
+        SET_D2S: Initialized SET_D2S sparsifier.
+    """
+    return SET_D2S(
+        scheduler=DenseToSparseCosineScheduler(
+            quantity=pruning_ratio,
+            t_end=t_end,
+            delta_t=delta_t,
+            t_dense=t_dense,
+        ),
+        distribution=UniformDistribution(),
+        optimizer=optimizer,
+        sparsity=sparsity,
+        t_dense=t_dense,
         global_pruning=global_pruning,
     )
 

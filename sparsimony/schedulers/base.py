@@ -72,6 +72,51 @@ class CosineDecayScheduler(BaseScheduler):
             return self.quantity / 2 * (1 + np.cos((step * np.pi) / self.t_end))
 
 
+class DenseToSparseCosineScheduler(BaseScheduler):
+    """CosineDecay schedule with an initial dense-training phase.
+
+    Returns ``None`` (no topology update) for every step before ``t_dense`` so
+    the model trains fully dense during the warmup. From ``t_dense`` onward it
+    behaves like ``CosineDecayScheduler`` but **re-anchored to**
+    ``[t_dense, t_end]``: the prune-ratio decays from ``quantity`` at
+    ``t_dense`` to ~0 at ``t_end``. The first non-``None`` value is returned at
+    the first ``delta_t`` boundary ``>= t_dense`` (the dense phase therefore ends
+    on that boundary).
+    """
+
+    def __init__(
+        self,
+        quantity: float,
+        t_end: int,
+        delta_t: int,
+        t_dense: int,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(quantity, t_end, delta_t)
+        self.t_dense = t_dense
+
+    def next_step_update(self, last_step: int) -> bool:
+        # Suppress dense-grad accumulation (RigL_D2S) during the dense phase.
+        if last_step + 1 < self.t_dense:
+            return False
+        return (last_step + 1) % self.delta_t == 0
+
+    def __call__(self, step: int) -> Optional[float]:
+        if step < self.t_dense:
+            return None
+        if step % self.delta_t != 0:
+            return None
+        if step > self.t_end:
+            return None
+        denom = max(self.t_end - self.t_dense, 1)
+        return (
+            self.quantity
+            / 2
+            * (1 + np.cos(((step - self.t_dense) * np.pi) / denom))
+        )
+
+
 class SoftMemoryBoundScheduler(BaseScheduler):
     def __init__(
         self,
