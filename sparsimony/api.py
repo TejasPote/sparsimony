@@ -24,6 +24,8 @@ from sparsimony.dst.gmp import GMP
 from sparsimony.dst.static import (
     StaticMagnitudeSparsifier,
     StaticGradientSparsifier,
+    StaticRandomSparsifier,
+    StaticMagnitudeD2S,
 )
 from sparsimony.pruners import SRSTESparsifier
 from sparsimony.dst.set_delta import SET_Delta
@@ -372,6 +374,61 @@ def static(
         optimizer=optimizer,
         distribution=UniformDistribution(),
         sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
+
+def static_random(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    global_pruning: bool = False,
+) -> StaticRandomSparsifier:
+    """Return StaticRandom sparsifier (random prune-at-init, frozen topology).
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+
+    Returns:
+        StaticRandomSparsifier: Initialized StaticRandom sparsifier.
+    """
+    return StaticRandomSparsifier(
+        optimizer=optimizer,
+        distribution=UniformDistribution(),
+        sparsity=sparsity,
+        global_pruning=global_pruning,
+    )
+
+
+def static_magnitude_d2s(
+    optimizer: torch.optim.Optimizer,
+    sparsity: float,
+    t_prune: int,
+    global_pruning: bool = False,
+) -> StaticMagnitudeD2S:
+    """Return StaticMagnitudeD2S sparsifier.
+
+    Trains dense until `t_prune`, magnitude-prunes once to `sparsity`, then
+    freezes the topology for the rest of training.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Previously initialized optimizer for
+            training. Used to override the dense gradient buffers for
+            sparse weights.
+        sparsity (float): Sparsity level to prune network to.
+        t_prune (int): Optimizer step at which the one-shot prune fires. Values
+            <= 0 prune at initialization.
+
+    Returns:
+        StaticMagnitudeD2S: Initialized StaticMagnitudeD2S sparsifier.
+    """
+    return StaticMagnitudeD2S(
+        optimizer=optimizer,
+        distribution=UniformDistribution(),
+        sparsity=sparsity,
+        t_prune=t_prune,
         global_pruning=global_pruning,
     )
 

@@ -13,9 +13,17 @@ from sparsimony.parametrization.fake_sparsity import (
     FakeSparsity,
     FakeSparsityDenseGradBuffer,
 )
-from sparsimony.mask_calculators import UnstructuredPruner, MagnitudeScorer
+from sparsimony.mask_calculators import (
+    UnstructuredPruner,
+    MagnitudeScorer,
+    RandomScorer,
+)
 from sparsimony.utils import get_mask, get_parametrization
-from sparsimony.schedulers.base import BaseScheduler, StaticScheduler
+from sparsimony.schedulers.base import (
+    BaseScheduler,
+    StaticScheduler,
+    OneShotSparsityScheduler,
+)
 
 
 class StaticMagnitudeSparsifier(DSTMixin, BaseSparsifier):
@@ -71,6 +79,115 @@ class StaticMagnitudeSparsifier(DSTMixin, BaseSparsifier):
 
     def update_mask(self):
         pass
+
+
+class StaticRandomSparsifier(StaticMagnitudeSparsifier):
+    """Random static sparse mask drawn once at initialization (prune-at-init).
+
+    Identical to ``StaticMagnitudeSparsifier`` except the surviving weights are
+    chosen uniformly at random rather than by magnitude. This is the right
+    prune-at-init criterion for LoRA adapters: ``lora_B`` is zero-initialized,
+    so a magnitude criterion scores every element identically at step 0 and
+    degenerates into arbitrary tie-breaking.
+
+    ``random_mask_init=True`` is forced so ``DSTMixin._global_init_prune`` also
+    takes its random branch when ``global_pruning=True``.
+    """
+
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        distribution: BaseDistribution,
+        sparsity: float,
+        defaults: Optional[Dict[str, Any]] = None,
+        scheduler: BaseScheduler | None = None,
+        *args,
+        **kwargs,
+    ):
+        kwargs.setdefault("random_mask_init", True)
+        super().__init__(
+            optimizer=optimizer,
+            distribution=distribution,
+            sparsity=sparsity,
+            defaults=defaults,
+            scheduler=scheduler,
+            *args,
+            **kwargs,
+        )
+        # Overrides the MagnitudeScorer pruner set by the parent __init__. Safe
+        # here: nothing consumes self.pruner until prepare().
+        self.pruner = UnstructuredPruner(scorer=RandomScorer)
+
+
+class StaticMagnitudeD2S(StaticMagnitudeSparsifier):
+    """Dense warmup, then a single magnitude prune to ``sparsity``.
+
+    Masks start all-ones so the model trains fully dense until the
+    ``OneShotSparsityScheduler`` fires at ``t_prune``, at which point every
+    layer is magnitude-pruned once to its target sparsity. The topology is then
+    frozen for the rest of training (static sparse training on the pruned
+    subnetwork).
+
+    ``t_prune <= 0`` prunes at initialization instead, which is exactly the
+    behavior of the plain ``StaticMagnitudeSparsifier``.
+    """
+
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        distribution: BaseDistribution,
+        sparsity: float,
+        t_prune: int,
+        defaults: Optional[Dict[str, Any]] = None,
+        scheduler: BaseScheduler | None = None,
+        *args,
+        **kwargs,
+    ):
+        if scheduler is None:
+            scheduler = OneShotSparsityScheduler(
+                final_sparsity=sparsity, t_prune=t_prune
+            )
+        self.t_prune = t_prune
+        self._pruned = False
+        super().__init__(
+            optimizer=optimizer,
+            distribution=distribution,
+            sparsity=sparsity,
+            defaults=defaults,
+            scheduler=scheduler,
+            *args,
+            **kwargs,
+        )
+
+    def _initialize_masks(self):
+        if self.t_prune <= 0:
+            # Prune-at-init parity with StaticMagnitudeSparsifier.
+            super()._initialize_masks()
+            self._pruned = True
+            return
+        # Record the per-layer sparsity targets but leave the masks dense; the
+        # one-shot prune happens in _step() when the scheduler fires.
+        self._distribute_sparsity(self.sparsity)
+        for config in self.groups:
+            mask = get_mask(config["module"], config["tensor_name"])
+            mask.data = torch.ones_like(mask)
+
+    def _step(self) -> bool:
+        self._step_count += 1
+        if self._pruned:
+            return False
+        if self.scheduler(self._step_count) is None:
+            return False
+        self._logger.info(
+            f"Pruning to {self.sparsity*100:.2f}% sparsity at step "
+            f"{self._step_count}"
+        )
+        # Reuse the parent's prune: distribute + (global or layerwise) magnitude
+        # prune + sparsity assertion.
+        super()._initialize_masks()
+        self._broadcast_masks()
+        self._pruned = True
+        return True
 
 
 class StaticSparsifier(DSTMixin, BaseSparsifier):

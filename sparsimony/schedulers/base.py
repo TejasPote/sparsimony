@@ -117,6 +117,38 @@ class DenseToSparseCosineScheduler(BaseScheduler):
         )
 
 
+class OneShotSparsityScheduler(BaseScheduler):
+    """Return ``final_sparsity`` from ``t_prune`` onward, ``None`` before it.
+
+    Drives a single dense -> sparse transition for static (prune-once) sparse
+    training: the sparsifier trains fully dense while this returns ``None``,
+    then prunes once to ``final_sparsity`` and freezes the topology for the rest
+    of training.
+
+    Like ``AcceleratedCubicScheduler`` (and unlike the cosine schedulers) the
+    returned value is an absolute sparsity level, not a prune ratio.
+
+    Stateless by design: it keeps returning ``final_sparsity`` after ``t_prune``
+    and the sparsifier holds the fire-once latch. Re-pruning an already-pruned
+    mask to the same level is a no-op (``calculate_n_drop`` returns <= 0), so
+    this is safe across checkpoint resume.
+    """
+
+    def __init__(self, final_sparsity: float, t_prune: int, *args, **kwargs):
+        super().__init__(quantity=final_sparsity, t_end=t_prune, delta_t=1)
+        self.final_sparsity = final_sparsity
+        self.t_prune = t_prune
+
+    def next_step_update(self, last_step: int) -> bool:
+        # No dense gradient accumulation needed (plain FakeSparsity).
+        return False
+
+    def __call__(self, step: int) -> Optional[float]:
+        if step < self.t_prune:
+            return None
+        return self.final_sparsity
+
+
 class SoftMemoryBoundScheduler(BaseScheduler):
     def __init__(
         self,
